@@ -1,0 +1,35 @@
+<!doctype html><meta charset="utf-8"><title>scene smoke</title>
+<link rel="stylesheet" href="/src/ui/ui.css">
+<script type="importmap">{"imports":{"phaser":"/tests/smoke/phaser-stub.js","pdfjs-dist/build/pdf.mjs":"/node_modules/pdfjs-dist/build/pdf.mjs"}}</script>
+<body><script type="module">
+import { AuditoriumScene } from '/src/scenes/AuditoriumScene.js';
+const q = new URLSearchParams(location.search);
+const sc = new AuditoriumScene();
+// point the client at the dev server of this run
+const { NetworkClient } = await import('/src/network/NetworkClient.js');
+NetworkClient.prototype.__url = 'ws://localhost:' + q.get('port');
+const _c = NetworkClient.prototype.connect; NetworkClient.prototype.connect = function () { this.url = this.__url; return _c.call(this); };
+sc.init({ nick: q.get('nick') || 'Smoke', gender: 'female', muted: true });
+sc.create();
+const { isSolid } = await import('/src/config/settings.js');
+let t = 0;
+function path(from, to, scene) {
+  const G = 8, W = 160, H = 120, k = (x, y) => y * W + x, prev = new Map([[k(Math.round(from.x / G), Math.round(from.y / G)), -1]]);
+  const q = [[Math.round(from.x / G), Math.round(from.y / G)]], tx = Math.round(to.x / G), ty = Math.round(to.y / G);
+  for (let i = 0; i < q.length; i++) { const [x, y] = q[i]; if (Math.abs(x - tx) + Math.abs(y - ty) <= 1) { const out = []; let c = k(x, y); while (c !== -1) { out.push([c % W * G, Math.floor(c / W) * G]); c = prev.get(c); } return out.reverse(); }
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const nx = x + dx, ny = y + dy; if (nx < 0 || ny < 0 || nx >= W || ny >= H || prev.has(k(nx, ny)) || isSolid(scene, nx * G, ny * G)) continue; prev.set(k(nx, ny), k(x, y)); q.push([nx, ny]); } }
+  return null;
+}
+window.sm = {
+  sc,
+  frames(n, held = []) { for (const k of Object.keys(sc.keys)) sc.keys[k].isDown = held.includes(k); return new Promise((res) => { let i = 0; const id = setInterval(() => { t += 50; sc.update(t, 50); if (++i >= n) { clearInterval(id); res(sc.me.pos); } }, 50); }); },
+  async goTo(x, y) {
+    const wp = path(sc.me.pos, { x, y }, sc.scene_); if (!wp) return 'no-path';
+    for (let i = 2; i < wp.length; i += 2) { const [wx, wy] = wp[i];
+      for (let n = 0; n < 40; n++) { const p = sc.me.pos, dx = wx - p.x, dy = wy - p.y; if (Math.hypot(dx, dy) < 5) break;
+        await window.sm.frames(1, [dx > 3 ? 'D' : dx < -3 ? 'A' : '', dy > 3 ? 'S' : dy < -3 ? 'W' : ''].filter(Boolean)); } }
+    return sc.me.pos;
+  },
+  ready: () => sc.net.open && sc.net.id && sc.me.pos,
+};
+</script>

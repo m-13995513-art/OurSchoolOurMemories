@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<title>UI harness (no Phaser)</title>
+<script type="importmap">{"imports":{"pdfjs-dist":"/node_modules/pdfjs-dist/build/pdf.min.mjs"}}</script>
+<link rel="stylesheet" href="/src/ui/ui.css">
+<style>html,body{margin:0;height:100%;background:#2b2140;overflow:hidden;font-family:sans-serif}
+#sim{position:fixed;left:0;right:0;bottom:0;display:grid;grid-template-columns:repeat(4,1fr);gap:4px;padding:4px;pointer-events:none;opacity:.001;height:1px}
+#sim div{aspect-ratio:16/9;background:#031 center/cover}</style></head>
+<body><div id="sim"><div data-sim="main"></div><div data-sim="left"></div><div data-sim="right"></div><div data-sim="rear"></div></div>
+<script>window.__PDFJS_WORKER__='/node_modules/pdfjs-dist/build/pdf.worker.min.mjs';</script>
+<script type="module">
+import { NetworkClient } from '/src/network/NetworkClient.js';
+import { RoomState } from '/src/network/RoomState.js';
+import { AuditoriumC } from '/src/ui/AUDITORIUMC.js';
+import { MediaPlayerUI } from '/src/ui/MediaPlayer.js';
+import { MediaSync, httpBaseFromWs } from '/src/systems/MediaSync.js';
+import { GamePanel } from '/src/ui/GamePanel.js';
+import { HUD } from '/src/ui/HUD.js';
+import { MobileControls } from '/src/ui/MobileControls.js';
+const q = new URLSearchParams(location.search);
+const ws = 'ws://localhost:' + q.get('port');
+const net = new NetworkClient({ url: ws, room: q.get('room') || 'ui', nick: q.get('nick') || 'Tester', clientId: q.get('cid') || undefined, gender: q.get('gender') || 'male' });
+const state = new RoomState(net);
+const sync = new MediaSync(state, httpBaseFromWs(ws));
+const hud = new HUD({ nick: net.nick, onAudio: () => sync.enable() });
+const panel = new GamePanel(state);
+const mc = new MobileControls({ onInteract: () => { window.__interacts = (window.__interacts || 0) + 1; } });
+const ac = new AuditoriumC(state), mp = new MediaPlayerUI(state, sync);
+// the harness mimics the 4 in-game screens: all of them read the ONE shared state
+const sim = () => document.querySelectorAll('[data-sim]').forEach((el) => { const u = state.slide(); el.style.backgroundImage = u ? `url("${u}")` : 'none'; el.dataset.slide = state.ppt.presentationId ? state.ppt.currentSlide : ''; el.dataset.playing = state.ppt.isPlaying; el.dataset.ended = state.ppt.ended; });
+state.subscribe((k) => { sim(); hud.setConnection(net.status, state.players.size); hud.setPlayers([...state.players.values()], net.id); });
+net.on('status', () => hud.setConnection(net.status, state.players.size));
+let pos = null; net.on('welcome', (m) => { const me = m.players.find((p) => p.id === m.id); pos = { x: me.x, y: me.y }; });
+net.on('correct', (m) => { pos = { x: m.x, y: m.y }; });
+window.osom = { net, state, sync, ac, mp, mc, hud, panel,
+  async walk(pts) { for (const [tx, ty] of pts) { for (let g = 0; g < 400; g++) { const d = Math.hypot(tx - pos.x, ty - pos.y); if (d < .5) break; const k = Math.min(1, 17 / d); pos = { x: pos.x + (tx - pos.x) * k, y: pos.y + (ty - pos.y) * k }; net.send({ t: 'move', ...pos, dir: 'left', anim: 'walk', scene: 'auditorium' }); await new Promise((r) => setTimeout(r, 100)); } } return pos; },
+  ready: () => net.open };
+net.connect();
+</script></body></html>
